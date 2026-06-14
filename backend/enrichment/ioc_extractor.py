@@ -1,5 +1,6 @@
 import re
-from datetime import datetime
+
+from backend.config import utc_now
 
 
 IPV4_PATTERN = r'\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b'
@@ -34,7 +35,7 @@ VALID_TLDS = {
 
 
 def extract_iocs(text: str) -> list[dict]:
-    ts = datetime.utcnow().isoformat() + "Z"
+    ts = utc_now().isoformat()
     text = text if isinstance(text, str) else str(text)
     iocs = []
     seen_values = set()

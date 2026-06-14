@@ -1,12 +1,12 @@
 import base64
 import io
-from datetime import datetime
 
+from backend.config import utc_now
 from pypdf import PdfReader
 
 
 def parse_pdf(base64_content: str) -> str:
-    start = datetime.utcnow()
+    start = utc_now()
     pdf_bytes = base64.b64decode(base64_content)
     reader = PdfReader(io.BytesIO(pdf_bytes))
     text = ""
@@ -15,10 +15,10 @@ def parse_pdf(base64_content: str) -> str:
         if not extracted:
             extracted = page.extract_text(extraction_mode="layout") or ""
         text += extracted
-    elapsed = (datetime.utcnow() - start).total_seconds()
+    elapsed = (utc_now() - start).total_seconds()
     if not text.strip():
         return (
-            f"[{datetime.utcnow().isoformat()}Z] PDF appears to be scanned. "
+            f"[{utc_now().isoformat()}] PDF appears to be scanned. "
             f"Text extraction failed after {elapsed:.1f}s. "
             "Consider running OCR on this file."
         )
@@ -34,5 +34,5 @@ def get_pdf_metadata(base64_content: str) -> dict:
         "pages": len(reader.pages),
         "title": (metadata.title if metadata and metadata.title else ""),
         "author": (metadata.author if metadata and metadata.author else ""),
-        "extracted_at": datetime.utcnow().isoformat() + "Z",
+        "extracted_at": utc_now().isoformat(),
     }

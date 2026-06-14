@@ -1,6 +1,3 @@
-from datetime import datetime
-
-
 TECHNIQUE_MAP = {
     "powershell": [
         {

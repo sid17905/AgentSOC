@@ -1,10 +1,10 @@
 import re
-from datetime import datetime
 from email import policy
 from email.parser import Parser
 from email.utils import getaddresses, parseaddr
 from typing import List
 
+from backend.config import utc_now
 
 URL_PATTERN = r'https?://[^\s"\'<>]+'
 _URL_RE = re.compile(URL_PATTERN)
@@ -14,7 +14,7 @@ _DOMAIN_RE = re.compile(r'\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b')
 
 
 def parse_email(raw_email: str) -> dict:
-    parsed_at = datetime.utcnow().isoformat() + "Z"
+    parsed_at = utc_now().isoformat()
     message = Parser(policy=policy.default).parsestr(raw_email)
 
     sender_header = message.get("From", "")

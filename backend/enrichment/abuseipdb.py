@@ -1,5 +1,4 @@
-import os
-from datetime import datetime
+from backend.config import get_settings, utc_now
 
 
 ABUSEIPDB_URL = "https://api.abuseipdb.com/api/v2/check"
@@ -8,8 +7,8 @@ BAD_DOMAINS_TLD = {".tk", ".xyz", ".top", ".club", ".gq"}
 
 
 def lookup(ioc_value: str, ioc_type: str) -> dict:
-    api_key = os.getenv("ABUSEIPDB_API_KEY", "")
-    checked_at = datetime.utcnow().isoformat() + "Z"
+    api_key = get_settings().abuseipdb_api_key
+    checked_at = utc_now().isoformat()
 
     if not api_key:
         reputation = _offline_reputation(ioc_value, ioc_type)

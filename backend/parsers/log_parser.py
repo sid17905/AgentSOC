@@ -1,9 +1,9 @@
 import json
 import re
 import xml.etree.ElementTree as ET
-from datetime import datetime
 from typing import Any
 
+from backend.config import utc_now
 
 IP_PATTERN = r'\b(?:\d{1,3}\.){3}\d{1,3}\b'
 HASH_PATTERN = r'\b[a-fA-F0-9]{32,64}\b'
@@ -51,7 +51,7 @@ _ENTRY_FIELDS = (
 
 
 def parse_log(raw_text: str) -> dict:
-    parsed_at = datetime.utcnow().isoformat() + "Z"
+    parsed_at = utc_now().isoformat()
     raw_text = raw_text if isinstance(raw_text, str) else str(raw_text)
 
     source_type = _detect_source_type(raw_text)
