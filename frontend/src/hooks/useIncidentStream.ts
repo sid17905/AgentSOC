@@ -1,0 +1,65 @@
+import { useEffect, useRef, useState } from "react";
+import type { IncidentReport } from "../types";
+import { MOCK_INCIDENTS, USE_MOCK } from "../types/mockData";
+
+// Relative WS path - resolved by Vite proxy to ws://localhost:8000
+const WS_URL = `ws://${window.location.host}/ws/incidents`;
+
+export function useIncidentStream() {
+  const [incidents, setIncidents] = useState<IncidentReport[]>(
+    USE_MOCK ? MOCK_INCIDENTS : [],
+  );
+  const [connected, setConnected] = useState(USE_MOCK);
+  const wsRef = useRef<WebSocket | null>(null);
+  const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (USE_MOCK) return;
+
+    function connect() {
+      const ws = new WebSocket(WS_URL);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        setConnected(true);
+        if (retryRef.current) clearTimeout(retryRef.current);
+      };
+
+      ws.onclose = () => {
+        setConnected(false);
+        retryRef.current = setTimeout(connect, 3000);
+      };
+
+      ws.onerror = () => ws.close();
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (Array.isArray(msg)) {
+            setIncidents(msg);
+          } else if (msg.type === "incident_update") {
+            setIncidents((prev) => {
+              const idx = prev.findIndex((incident) => incident.id === msg.data.id);
+              if (idx >= 0) {
+                const next = [...prev];
+                next[idx] = msg.data;
+                return next;
+              }
+              return [msg.data, ...prev];
+            });
+          }
+        } catch {
+          console.warn("[WS] Failed to parse message", event.data);
+        }
+      };
+    }
+
+    connect();
+    return () => {
+      if (retryRef.current) clearTimeout(retryRef.current);
+      wsRef.current?.close();
+    };
+  }, []);
+
+  return { incidents, connected };
+}
