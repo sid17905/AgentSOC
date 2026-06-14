@@ -1,5 +1,5 @@
 import axios from "axios";
-import type { AgentInput, IncidentReport } from "../types";
+import type { AgentInput, IncidentReport, IngestionStatus } from "../types";
 
 // Uses Vite proxy (see vite.config.ts) - no hardcoded port needed
 const BASE = "/api/v1";
@@ -8,7 +8,10 @@ export const api = {
   analyze: (input: AgentInput) =>
     axios.post<{ incident_id: string }>(`${BASE}/analyze`, input),
 
-  getIncidents: () => axios.get<IncidentReport[]>(`${BASE}/incidents`),
+  getIncidents: () =>
+    axios.get<IncidentReport[]>(`${BASE}/incidents`, {
+      params: { _: Date.now() },
+    }),
 
   getIncident: (id: string) => axios.get<IncidentReport>(`${BASE}/incidents/${id}`),
 
@@ -23,6 +26,22 @@ export const api = {
     form.append("file", file);
     return axios.post<AgentInput>(`${BASE}/upload`, form);
   },
+
+  getMockIngestionStatus: () =>
+    axios.get<IngestionStatus>(`${BASE}/ingestion/mock/status`),
+
+  startMockIngestion: (intervalSeconds = 30, limit = 8) =>
+    axios.post<IngestionStatus>(`${BASE}/ingestion/mock/start`, null, {
+      params: { interval_seconds: intervalSeconds, limit },
+    }),
+
+  stopMockIngestion: () =>
+    axios.post<IngestionStatus>(`${BASE}/ingestion/mock/stop`),
+
+  ingestMockOnce: () =>
+    axios.post<{ source: string; filename: string; incident_id: string | null }>(
+      `${BASE}/ingestion/mock/once`,
+    ),
 };
 
 export async function fetchIncidents(): Promise<IncidentReport[]> {

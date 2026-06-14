@@ -58,8 +58,8 @@ Jun 14 11:46:01 iam-01 auth[8142]: unusual access token use user=analyst2 countr
 class MockIngestionStatus:
     running: bool = False
     produced_count: int = 0
-    interval_seconds: float = 15.0
-    limit: Optional[int] = None
+    interval_seconds: float = 30.0
+    limit: Optional[int] = 8
     last_filename: Optional[str] = None
     last_incident_id: Optional[str] = None
     last_error: Optional[str] = None
@@ -152,4 +152,3 @@ class MockIngestionRunner:
 
 
 mock_ingestion = MockIngestionRunner()
-

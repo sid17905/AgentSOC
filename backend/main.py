@@ -217,7 +217,7 @@ async def ingest_mock_once():
 
 
 @app.post("/api/v1/ingestion/mock/start")
-async def start_mock_ingestion(interval_seconds: float = 15.0, limit: int | None = None):
+async def start_mock_ingestion(interval_seconds: float = 30.0, limit: int | None = 8):
     return mock_ingestion.start(
         submit_for_analysis,
         interval_seconds=interval_seconds,

@@ -2,7 +2,8 @@ import sqlite3
 from pathlib import Path
 
 
-DB_PATH = Path("data") / "csirt_incidents.db"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DB_PATH = PROJECT_ROOT / "data" / "csirt_incidents.db"
 
 
 def get_connection() -> sqlite3.Connection:
@@ -37,4 +38,3 @@ def init_db() -> None:
             """
         )
         conn.commit()
-

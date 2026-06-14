@@ -52,3 +52,19 @@ export interface AgentInput {
   content: string;
   filename?: string;
 }
+
+export interface IngestionStatus {
+  running?: boolean;
+  produced_count?: number;
+  interval_seconds?: number;
+  limit?: number | null;
+  last_filename?: string | null;
+  last_incident_id?: string | null;
+  last_error?: string | null;
+  last_ingested_at?: string | null;
+  enabled?: boolean;
+  directory?: string | null;
+  auto_fetch_enabled?: boolean;
+  auto_fetch_sources?: string[];
+  auto_fetch_interval_seconds?: number;
+}

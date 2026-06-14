@@ -1,9 +1,14 @@
-import { Activity, Clock, FolderInput, RadioTower } from "lucide-react";
+import { Activity, Play, RefreshCw, Send, Square } from "lucide-react";
 import type { IngestionStatus } from "../types";
 
 type AutomationStatusProps = {
   status: IngestionStatus | null;
   loading: boolean;
+  busy?: boolean;
+  onStart: () => void;
+  onStop: () => void;
+  onOnce: () => void;
+  onRefresh: () => void;
 };
 
 const formatSeconds = (seconds?: number) => {
@@ -18,10 +23,16 @@ const statusPill = (enabled: boolean) =>
     ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
     : "bg-slate-100 text-slate-500 ring-slate-200";
 
-export function AutomationStatus({ status, loading }: AutomationStatusProps) {
-  const folderEnabled = Boolean(status?.enabled);
-  const fetchEnabled = Boolean(status?.auto_fetch_enabled);
-  const fetchSources = status?.auto_fetch_sources ?? [];
+export function AutomationStatus({
+  status,
+  loading,
+  busy = false,
+  onStart,
+  onStop,
+  onOnce,
+  onRefresh,
+}: AutomationStatusProps) {
+  const running = Boolean(status?.running);
 
   return (
     <section className="mb-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -30,69 +41,92 @@ export function AutomationStatus({ status, loading }: AutomationStatusProps) {
           <div className="flex items-center gap-2">
             <Activity size={16} className="text-sky-600" />
             <h2 className="text-sm font-semibold text-slate-950">
-              Autonomous intake
+              Mock ingestion
             </h2>
           </div>
           <p className="mt-1 text-xs leading-5 text-slate-500">
             {loading
               ? "Checking backend status..."
-              : "Logs are collected by the backend on a schedule."}
+              : "Feeds sample security events into the live queue."}
           </p>
         </div>
         <span
           className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${statusPill(
-            folderEnabled || fetchEnabled,
+            running,
           )}`}
         >
-          {folderEnabled || fetchEnabled ? "On" : "Off"}
+          {running ? "On" : "Off"}
         </span>
       </div>
 
-      <div className="space-y-3">
-        <div className="rounded-md border border-slate-100 bg-slate-50 p-3">
-          <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-            <RadioTower size={16} />
-            Scheduled log fetch
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        <div className="rounded-md bg-slate-50 p-3">
+          <div className="font-semibold text-slate-800">
+            {status?.produced_count ?? 0}
           </div>
-          <p className="mt-2 text-xs text-slate-500">
-            {fetchEnabled
-              ? `Fetches every ${formatSeconds(status?.auto_fetch_interval_seconds)}`
-              : "Disabled"}
-          </p>
-          {fetchSources.length > 0 ? (
-            <ul className="mt-2 space-y-1">
-              {fetchSources.map((source) => (
-                <li
-                  key={source}
-                  className="truncate rounded bg-white px-2 py-1 font-mono text-xs text-slate-600"
-                  title={source}
-                >
-                  {source}
-                </li>
-              ))}
-            </ul>
-          ) : null}
+          <div className="mt-1 text-slate-500">Produced</div>
         </div>
-
-        <div className="rounded-md border border-slate-100 bg-slate-50 p-3">
-          <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-            <FolderInput size={16} />
-            Inbox folder
+        <div className="rounded-md bg-slate-50 p-3">
+          <div className="font-semibold text-slate-800">
+            {formatSeconds(status?.interval_seconds)}
           </div>
-          <p className="mt-2 break-all font-mono text-xs text-slate-600">
-            {status?.directory ?? "Not configured"}
-          </p>
-          <p className="mt-2 text-xs text-slate-500">
-            {folderEnabled
-              ? `Checks every ${formatSeconds(status?.interval_seconds)}`
-              : "Disabled"}
-          </p>
+          <div className="mt-1 text-slate-500">Interval</div>
         </div>
+      </div>
 
-        <div className="flex items-center gap-2 text-xs text-slate-500">
-          <Clock size={14} />
-          New fetched logs appear in the incident feed without manual upload.
+      <div className="mt-3 rounded-md border border-slate-100 bg-slate-50 p-3">
+        <div className="truncate font-mono text-xs text-slate-700">
+          {status?.last_filename ?? "No mock event sent yet"}
         </div>
+        {status?.last_ingested_at ? (
+          <div className="mt-2 text-xs text-slate-500">
+            Last sent: {new Date(status.last_ingested_at).toLocaleTimeString()}
+          </div>
+        ) : null}
+        {status?.last_error ? (
+          <div className="mt-2 rounded bg-red-50 px-2 py-1 text-xs text-red-700">
+            {status.last_error}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          className="inline-flex items-center justify-center gap-2 rounded-md bg-slate-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+          onClick={onStart}
+          disabled={running || busy}
+        >
+          <Play size={14} />
+          Start
+        </button>
+        <button
+          type="button"
+          className="inline-flex items-center justify-center gap-2 rounded-md bg-white px-3 py-2 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400"
+          onClick={onStop}
+          disabled={!running || busy}
+        >
+          <Square size={14} />
+          Stop
+        </button>
+        <button
+          type="button"
+          className="inline-flex items-center justify-center gap-2 rounded-md bg-white px-3 py-2 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400"
+          onClick={onOnce}
+          disabled={busy}
+        >
+          <Send size={14} />
+          One event
+        </button>
+        <button
+          type="button"
+          className="inline-flex items-center justify-center gap-2 rounded-md bg-white px-3 py-2 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400"
+          onClick={onRefresh}
+          disabled={busy}
+        >
+          <RefreshCw size={14} />
+          Refresh
+        </button>
       </div>
     </section>
   );

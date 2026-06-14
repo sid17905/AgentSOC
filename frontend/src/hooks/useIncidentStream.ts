@@ -6,6 +6,7 @@ import { MOCK_INCIDENTS, USE_MOCK } from "../types/mockData";
 // Relative WS path - resolved by Vite proxy to ws://localhost:8000
 const WS_PROTOCOL = window.location.protocol === "https:" ? "wss" : "ws";
 const WS_URL = `${WS_PROTOCOL}://${window.location.host}/ws/incidents`;
+const INCIDENT_POLL_MS = 5000;
 
 export function useIncidentStream() {
   const [incidents, setIncidents] = useState<IncidentReport[]>(
@@ -20,15 +21,16 @@ export function useIncidentStream() {
 
     let isMounted = true;
 
-    fetchIncidents()
-      .then((fetchedIncidents) => {
+    async function refreshIncidents() {
+      try {
+        const fetchedIncidents = await fetchIncidents();
         if (isMounted) {
           setIncidents((current) => mergeIncidents(current, fetchedIncidents));
         }
-      })
-      .catch((error) => {
+      } catch (error) {
         console.warn("[API] Failed to fetch incidents", error);
-      });
+      }
+    }
 
     function connect() {
       const ws = new WebSocket(WS_URL);
@@ -62,10 +64,14 @@ export function useIncidentStream() {
       };
     }
 
+    refreshIncidents();
+    const pollTimer = window.setInterval(refreshIncidents, INCIDENT_POLL_MS);
     connect();
+
     return () => {
       isMounted = false;
       if (retryRef.current) clearTimeout(retryRef.current);
+      window.clearInterval(pollTimer);
       wsRef.current?.close();
     };
   }, []);
