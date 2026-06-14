@@ -1,0 +1,291 @@
+================================================================
+CSIRT AUTOPILOT — COMMON REFERENCE FILE (REVISED: FREE ONLY)
+Shared by all 4 members. DO NOT deviate from these names.
+Last updated: June 2026
+================================================================
+
+⚠️  PAID SERVICE POLICY — READ FIRST
+-----------------------------------------------------------
+ALL external services used in this project MUST be free.
+No API keys that require a credit card or paid plan.
+
+REMOVED (was paid):        REPLACED WITH (free):
+─────────────────────────────────────────────────────────
+Anthropic Claude API   →   Ollama (local LLM, llama3/mistral)
+                           Rule-based fallback if Ollama absent
+Claude Vision API      →   pytesseract (OCR) + OpenCV
+VirusTotal API         →   AbuseIPDB free tier (1000 req/day)
+                           OR offline IP reputation list
+Jira Cloud             →   GitHub Issues API (free, needs PAT)
+                           OR local JSON file stub
+Slack (paid workspace) →   Optional: free Slack + incoming webhook
+                           OR console-print fallback
+-----------------------------------------------------------
+
+================================================================
+FULL FILE STRUCTURE
+================================================================
+
+csirt-autopilot/
+│
+├── backend/
+│   ├── main.py
+│   ├── requirements.txt
+│   ├── .env.example
+│   │
+│   ├── agent/
+│   │   ├── __init__.py
+│   │   ├── orchestrator.py
+│   │   ├── tools.py
+│   │   └── state.py
+│   │
+│   ├── parsers/
+│   │   ├── __init__.py
+│   │   ├── log_parser.py
+│   │   ├── pdf_parser.py
+│   │   ├── image_parser.py        ← pytesseract OCR (free)
+│   │   └── email_parser.py
+│   │
+│   ├── enrichment/
+│   │   ├── __init__.py
+│   │   ├── abuseipdb.py           ← replaces virustotal.py (free tier)
+│   │   ├── mitre.py
+│   │   └── ioc_extractor.py
+│   │
+│   ├── reporting/
+│   │   ├── __init__.py
+│   │   ├── report_generator.py
+│   │   └── templates/
+│   │       └── incident_report.md
+│   │
+│   ├── delivery/
+│   │   ├── __init__.py
+│   │   ├── slack_notifier.py      ← free webhook or console fallback
+│   │   └── github_issues.py       ← replaces jira_client.py (free)
+│   │
+│   └── schemas/
+│       ├── __init__.py
+│       ├── incident.py
+│       ├── ioc.py
+│       └── agent_input.py
+│
+├── frontend/
+│   ├── package.json
+│   ├── vite.config.ts
+│   ├── index.html
+│   └── src/
+│       ├── main.tsx
+│       ├── App.tsx
+│       ├── api/
+│       │   └── client.ts
+│       ├── hooks/
+│       │   └── useIncidentStream.ts
+│       ├── components/
+│       │   ├── IncidentFeed.tsx
+│       │   ├── AgentThoughts.tsx
+│       │   ├── IncidentDetail.tsx
+│       │   ├── SeverityBadge.tsx
+│       │   ├── ApprovalPanel.tsx
+│       │   ├── IOCTable.tsx
+│       │   └── UploadPanel.tsx
+│       └── types/
+│           └── index.ts
+│
+├── tests/
+│   ├── test_parsers.py
+│   ├── test_enrichment.py
+│   ├── test_orchestrator.py
+│   └── test_report_generator.py
+│
+├── samples/
+│   ├── sample_syslog.txt
+│   ├── sample_siem_alert.json
+│   └── sample_incident_report.pdf
+│
+├── docker-compose.yml
+└── README.md
+
+================================================================
+API ENDPOINTS — all members use these
+================================================================
+
+POST   /api/v1/analyze
+GET    /api/v1/incidents
+GET    /api/v1/incidents/{id}
+POST   /api/v1/incidents/{id}/approve
+POST   /api/v1/incidents/{id}/reject
+WS     /ws/incidents
+POST   /api/v1/upload
+GET    /api/v1/incidents/{id}/report/pdf
+
+================================================================
+SHARED PYDANTIC MODELS — use these exactly, never redefine
+================================================================
+
+# backend/schemas/incident.py
+class Severity(str, Enum):
+    P1 = "P1"   # Critical
+    P2 = "P2"   # High
+    P3 = "P3"   # Medium
+    P4 = "P4"   # Low
+
+class IncidentType(str, Enum):
+    RANSOMWARE        = "ransomware"
+    PHISHING          = "phishing"
+    DATA_EXFILTRATION = "data_exfiltration"
+    LATERAL_MOVEMENT  = "lateral_movement"
+    BRUTE_FORCE       = "brute_force"
+    UNKNOWN           = "unknown"
+
+class IncidentStatus(str, Enum):
+    PENDING           = "pending"
+    ANALYZING         = "analyzing"
+    AWAITING_APPROVAL = "awaiting_approval"
+    APPROVED          = "approved"
+    REJECTED          = "rejected"
+    CLOSED            = "closed"
+
+class IOC(BaseModel):
+    type: str        # "ip" | "hash" | "domain" | "cve" | "url"
+    value: str
+    confidence: float
+    reputation: Optional[str] = None   # from AbuseIPDB or offline list
+
+class MITRETechnique(BaseModel):
+    technique_id: str
+    technique_name: str
+    tactic: str
+
+class IncidentReport(BaseModel):
+    id: str
+    status: IncidentStatus
+    incident_type: IncidentType
+    severity: Severity
+    confidence: float
+    title: str
+    summary: str
+    iocs: List[IOC]
+    mitre_techniques: List[MITRETechnique]
+    playbook_steps: List[str]
+    raw_input: str
+    created_at: datetime
+    updated_at: datetime
+    report_markdown: Optional[str] = None
+    agent_thoughts: List[str] = []
+
+# backend/schemas/agent_input.py
+class InputType(str, Enum):
+    LOG   = "log"
+    PDF   = "pdf"
+    IMAGE = "image"
+    EMAIL = "email"
+    JSON  = "json"
+
+class AgentInput(BaseModel):
+    input_type: InputType
+    content: str
+    filename: Optional[str] = None
+
+================================================================
+SHARED CONSTANTS
+================================================================
+
+WEBSOCKET_URL   = "ws://localhost:8000/ws/incidents"
+API_BASE_URL    = "http://localhost:8000/api/v1"
+BACKEND_PORT    = 8000
+FRONTEND_PORT   = 5173
+
+OLLAMA_BASE_URL = "http://localhost:11434"     # local LLM (free)
+OLLAMA_MODEL    = "llama3"                     # or "mistral", "phi3"
+
+================================================================
+ENV VARIABLES — .env.example (ALL ARE OPTIONAL / FREE)
+================================================================
+
+# Local LLM — FREE (run: ollama pull llama3)
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3
+
+# AbuseIPDB — FREE tier (1000 lookups/day). Get key at abuseipdb.com
+ABUSEIPDB_API_KEY=
+
+# Slack — OPTIONAL, FREE (incoming webhooks on free workspace)
+SLACK_WEBHOOK_URL=
+
+# GitHub Issues — OPTIONAL, FREE (needs a GitHub PAT, no billing required)
+GITHUB_TOKEN=
+GITHUB_REPO=your-org/csirt-incidents   # e.g. "yourname/incidents"
+
+# NO Anthropic key needed — using Ollama local LLM instead
+# NO Jira key needed — using GitHub Issues instead
+# NO VirusTotal key — using AbuseIPDB free tier + offline lists
+
+================================================================
+PYTHON DEPENDENCIES (backend/requirements.txt) — ALL FREE
+================================================================
+
+fastapi==0.111.0
+uvicorn[standard]==0.30.0
+pydantic==2.7.0
+python-dotenv==1.0.0
+httpx==0.27.0
+pypdf==4.2.0
+python-multipart==0.0.9
+websockets==12.0
+requests==2.32.0
+
+# Free LLM client (calls local Ollama — no API key)
+ollama==0.2.1
+
+# Free OCR / image processing (replaces Claude Vision)
+Pillow==10.3.0
+pytesseract==0.3.10
+# Note: also requires tesseract-ocr system package:
+#   Ubuntu/Debian: sudo apt install tesseract-ocr
+#   macOS:         brew install tesseract
+#   Windows:       https://github.com/UB-Mannheim/tesseract/wiki
+
+# PDF generation (free, no paid license)
+reportlab==4.2.0
+
+================================================================
+FRONTEND DEPENDENCIES (frontend/package.json) — ALL FREE
+================================================================
+
+react, react-dom, typescript
+vite
+axios
+tailwindcss
+@tanstack/react-query
+lucide-react
+date-fns
+
+================================================================
+BRANCH STRATEGY
+================================================================
+
+main
+├── feature/member-a-agent-core
+├── feature/member-b-data-enrichment
+├── feature/member-c-frontend
+└── feature/member-d-reporting
+
+Merge order at integration sprint (Hour 2:30):
+1. Member A (schemas + agent core)
+2. Member B (depends on schemas from A)
+3. Member D (depends on schemas from A)
+4. Member C last (depends on API endpoints from A)
+
+================================================================
+HACKATHON TIMELINE SUMMARY
+================================================================
+
+Hour 0:00–0:45   Phase 1: Setup & Architecture
+Hour 0:45–2:30   Phase 2: Core Build (all members parallel)
+Hour 2:30–4:30   Phase 3: Integration Sprint
+Hour 4:30–6:00   Phase 4: Polish & Hardening
+Hour 6:00–8:00   Phase 5: Demo Prep & Buffer
+
+================================================================
+END OF COMMON REFERENCE
+================================================================
