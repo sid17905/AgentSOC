@@ -1,16 +1,9 @@
 import asyncio
 import inspect
 import json
-import os
 import re
 import time
-from datetime import datetime
 from typing import Callable
-
-try:
-    from dotenv import load_dotenv
-except Exception:
-    load_dotenv = None
 
 try:
     import ollama
@@ -19,6 +12,7 @@ except Exception:
 
 from backend.agent.state import AgentState
 from backend.agent.tools import TOOL_DESCRIPTIONS, execute_tool
+from backend.config import get_settings, utc_now
 from backend.schemas.agent_input import AgentInput
 from backend.schemas.incident import (
     IOC,
@@ -30,11 +24,7 @@ from backend.schemas.incident import (
 )
 
 
-if load_dotenv is not None:
-    load_dotenv()
-
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-MODEL = os.getenv("OLLAMA_MODEL", "llama3")
+settings = get_settings()
 
 SYSTEM_PROMPT = """
 You are CSIRT Autopilot, an AI security analyst. Analyze the incident
@@ -71,9 +61,9 @@ Start with {{ and end with }}.
 
 
 def log_thought(incident: IncidentReport, msg: str):
-    ts = datetime.utcnow().strftime("[%H:%M:%S UTC]")
+    ts = utc_now().strftime("[%H:%M:%S UTC]")
     incident.agent_thoughts.append(f"{ts} {msg}")
-    incident.updated_at = datetime.utcnow()
+    incident.updated_at = utc_now()
 
 
 def classify_rule_based(text: str) -> dict:
@@ -186,7 +176,7 @@ def _apply_agent_result(incident: IncidentReport, result: dict):
         result.get("mitre_techniques")
     )
     incident.playbook_steps = _coerce_strings(result.get("playbook_steps"))
-    incident.updated_at = datetime.utcnow()
+    incident.updated_at = utc_now()
 
 
 async def _broadcast_incident(broadcast_fn: Callable, incident: IncidentReport):
@@ -208,14 +198,14 @@ def _model_content(response) -> str:
 
 def _call_ollama(prompt: str):
     if hasattr(ollama, "Client"):
-        client = ollama.Client(host=OLLAMA_BASE_URL)
+        client = ollama.Client(host=settings.ollama_base_url)
         return client.chat(
-            model=MODEL,
+            model=settings.ollama_model,
             messages=[{"role": "user", "content": prompt}],
             options={"temperature": 0.1, "num_predict": 800},
         )
     return ollama.chat(
-        model=MODEL,
+        model=settings.ollama_model,
         messages=[{"role": "user", "content": prompt}],
         options={"temperature": 0.1, "num_predict": 800},
     )
@@ -299,6 +289,6 @@ async def run_agent(
         log_thought(incident, f"[Fallback] {fallback_reason}")
 
     incident.status = IncidentStatus.AWAITING_APPROVAL
-    incident.updated_at = datetime.utcnow()
+    incident.updated_at = utc_now()
     await _broadcast_incident(broadcast_fn, incident)
     return incident

@@ -3,7 +3,9 @@ from enum import Enum
 from typing import List, Optional
 import uuid
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from backend.config import utc_now
 
 
 class Severity(str, Enum):
@@ -45,26 +47,26 @@ class MITRETechnique(BaseModel):
 
 
 class IncidentReport(BaseModel):
-    id: str = None
+    id: Optional[str] = None
     status: IncidentStatus = IncidentStatus.PENDING
     incident_type: IncidentType = IncidentType.UNKNOWN
     severity: Severity = Severity.P3
     confidence: float = 0.0
     title: str = ""
     summary: str = ""
-    iocs: List[IOC] = []
-    mitre_techniques: List[MITRETechnique] = []
-    playbook_steps: List[str] = []
+    iocs: List[IOC] = Field(default_factory=list)
+    mitre_techniques: List[MITRETechnique] = Field(default_factory=list)
+    playbook_steps: List[str] = Field(default_factory=list)
     raw_input: str = ""
-    created_at: datetime = None
-    updated_at: datetime = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
     report_markdown: Optional[str] = None
-    agent_thoughts: List[str] = []
+    agent_thoughts: List[str] = Field(default_factory=list)
 
     def model_post_init(self, __context):
         if not self.id:
             self.id = str(uuid.uuid4())
         if not self.created_at:
-            self.created_at = datetime.utcnow()
+            self.created_at = utc_now()
         if not self.updated_at:
-            self.updated_at = datetime.utcnow()
+            self.updated_at = utc_now()

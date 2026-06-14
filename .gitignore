@@ -35,7 +35,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Codex/local assistant metadata
+# Agent/tooling local state
 .agents/
 .claude/
 

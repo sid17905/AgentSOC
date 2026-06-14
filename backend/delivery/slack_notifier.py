@@ -1,8 +1,6 @@
-import os
-from datetime import datetime
-
 import httpx
 
+from backend.config import get_settings, utc_now
 from backend.schemas.incident import IncidentReport
 
 
@@ -19,7 +17,7 @@ def _build_console_summary(incident: IncidentReport) -> str:
     ioc_list = ", ".join(ioc.value for ioc in incident.iocs[:3]) or "None"
     return (
         f"\n{'=' * 60}\n"
-        f"[CSIRT ALERT - Console Fallback] {datetime.utcnow().strftime('%H:%M:%S UTC')}\n"
+        f"[CSIRT ALERT - Console Fallback] {utc_now().strftime('%H:%M:%S UTC')}\n"
         f"  Severity:   {severity} ({incident.severity.value})\n"
         f"  Type:       {incident.incident_type.value}\n"
         f"  Title:      {incident.title or 'New Incident'}\n"
@@ -32,7 +30,8 @@ def _build_console_summary(incident: IncidentReport) -> str:
 
 
 async def send_slack_alert(incident: IncidentReport) -> bool:
-    webhook_url = os.getenv("SLACK_WEBHOOK_URL")
+    settings = get_settings()
+    webhook_url = settings.slack_webhook_url
 
     if not webhook_url:
         print(_build_console_summary(incident))
@@ -106,7 +105,7 @@ async def send_slack_alert(incident: IncidentReport) -> bool:
                         "type": "mrkdwn",
                         "text": (
                             "CSIRT Autopilot "
-                            f"(Ollama/{os.getenv('OLLAMA_MODEL', 'llama3')}) | "
+                            f"(Ollama/{settings.ollama_model}) | "
                             f"{str(incident.created_at)[:19]} UTC"
                         ),
                     }
