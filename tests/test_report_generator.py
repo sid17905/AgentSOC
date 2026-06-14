@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from backend.reporting.report_generator import generate_report
 from backend.schemas.incident import (
@@ -42,8 +42,8 @@ def make_sample_incident() -> IncidentReport:
             "Block C2 IPs at perimeter firewall",
         ],
         raw_input="Jan 15 14:22:01 web-01 kernel: [ransomware.exe] encrypting /data/",
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
         agent_thoughts=["[Parser] Log parsed", "[Classifier] Ransomware P1"],
     )
 

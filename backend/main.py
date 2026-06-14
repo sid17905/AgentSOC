@@ -1,13 +1,7 @@
 import asyncio
 import base64
 import inspect
-from datetime import datetime
 from typing import List
-
-try:
-    from dotenv import load_dotenv
-except Exception:
-    load_dotenv = None
 
 from fastapi import (
     FastAPI,
@@ -21,17 +15,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
 from backend.agent.orchestrator import run_agent
+from backend.config import get_settings, utc_now
 from backend.schemas import AgentInput, IncidentReport, IncidentStatus, InputType
 
 
-if load_dotenv is not None:
-    load_dotenv()
-
 app = FastAPI(title="CSIRT Autopilot")
+settings = get_settings()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[settings.frontend_origin],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -41,11 +34,11 @@ incidents: dict[str, IncidentReport] = {}
 
 
 def ts() -> str:
-    return datetime.utcnow().strftime("[%H:%M:%S UTC]")
+    return utc_now().strftime("[%H:%M:%S UTC]")
 
 
 def _now_z() -> str:
-    return f"{datetime.utcnow().isoformat()}Z"
+    return utc_now().isoformat()
 
 
 class ConnectionManager:
@@ -95,7 +88,7 @@ async def _maybe_create_github_issue(incident: IncidentReport):
         incident.agent_thoughts.append(
             f"{ts()} [GitHub Issues] Issue creation skipped: {exc}"
         )
-        incident.updated_at = datetime.utcnow()
+        incident.updated_at = utc_now()
 
 
 def _detect_input_type(file: UploadFile, data: bytes) -> InputType:
@@ -186,7 +179,7 @@ async def analyze(agent_input: AgentInput):
         status=IncidentStatus.ANALYZING,
         raw_input=agent_input.content,
     )
-    incident.agent_thoughts = [f"[{datetime.utcnow().isoformat()}Z] Analysis started."]
+    incident.agent_thoughts = [f"[{utc_now().isoformat()}] Analysis started."]
     incidents[incident.id] = incident
     await manager.broadcast(
         {"type": "incident_update", "data": incident.model_dump(mode="json")}
@@ -210,7 +203,7 @@ async def approve_incident(id: str):
     incident = _incident_or_404(id)
     now = _now_z()
     incident.status = IncidentStatus.APPROVED
-    incident.updated_at = datetime.utcnow()
+    incident.updated_at = utc_now()
     incident.agent_thoughts.append(f"[{now}] Analyst approved incident.")
     await _maybe_create_github_issue(incident)
     await manager.broadcast(
@@ -224,7 +217,7 @@ async def reject_incident(id: str):
     incident = _incident_or_404(id)
     now = _now_z()
     incident.status = IncidentStatus.REJECTED
-    incident.updated_at = datetime.utcnow()
+    incident.updated_at = utc_now()
     incident.agent_thoughts.append(
         f"[{now}] Analyst rejected - queued for re-analysis."
     )

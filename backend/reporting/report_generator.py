@@ -1,7 +1,7 @@
 import html
 import os
-from datetime import datetime
 
+from backend.config import get_settings, utc_now
 from backend.schemas.incident import IncidentReport
 
 
@@ -10,7 +10,6 @@ TEMPLATE_PATH = os.path.join(
     "templates",
     "incident_report.md",
 )
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
 
 
 def _markdown_cell(value: object) -> str:
@@ -66,7 +65,7 @@ def generate_report(incident: IncidentReport) -> str:
     replacements = {
         "{TITLE}": incident.title or "Untitled Incident",
         "{INCIDENT_ID}": incident.id,
-        "{GENERATED_AT}": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+        "{GENERATED_AT}": utc_now().strftime("%Y-%m-%d %H:%M UTC"),
         "{SEVERITY}": incident.severity.value,
         "{STATUS}": incident.status.value.replace("_", " ").title(),
         "{CONFIDENCE}": str(int(incident.confidence * 100)),
@@ -79,7 +78,7 @@ def generate_report(incident: IncidentReport) -> str:
         "{PLAYBOOK_STEPS}": playbook_steps,
         "{RAW_INPUT}": raw_input_preview,
         "{AGENT_THOUGHTS}": agent_thoughts,
-        "{OLLAMA_MODEL}": OLLAMA_MODEL,
+        "{OLLAMA_MODEL}": get_settings().ollama_model,
     }
 
     filled = template
