@@ -3,3 +3,58 @@
 .claude
 .venv
 00_common_refernce.txt
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.venv/
+venv/
+env/
+
+# Environment and local secrets
+.env
+.env.*
+!.env.example
+
+# Backend generated outputs
+*.log
+logs/
+reports/
+samples/demo_report_*.md
+samples/*.pdf
+
+# Node / frontend
+node_modules/
+dist/
+build/
+.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Codex/local assistant metadata
+.agents/
+.claude/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local runtime artifacts
+*.tmp
+*.temp
+*.bak
+
