@@ -1,4 +1,4 @@
-import { Clock, FolderInput, RadioTower } from "lucide-react";
+import { Activity, Clock, FolderInput, RadioTower } from "lucide-react";
 import type { IngestionStatus } from "../types";
 
 type AutomationStatusProps = {
@@ -25,11 +25,18 @@ export function AutomationStatus({ status, loading }: AutomationStatusProps) {
 
   return (
     <section className="mb-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="mb-3 flex items-center justify-between gap-3">
+      <div className="mb-4 flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-slate-950">Automation</h2>
-          <p className="text-xs text-slate-500">
-            {loading ? "Checking backend status..." : "Live ingestion settings"}
+          <div className="flex items-center gap-2">
+            <Activity size={16} className="text-sky-600" />
+            <h2 className="text-sm font-semibold text-slate-950">
+              Autonomous intake
+            </h2>
+          </div>
+          <p className="mt-1 text-xs leading-5 text-slate-500">
+            {loading
+              ? "Checking backend status..."
+              : "Logs are collected by the backend on a schedule."}
           </p>
         </div>
         <span
@@ -44,23 +51,8 @@ export function AutomationStatus({ status, loading }: AutomationStatusProps) {
       <div className="space-y-3">
         <div className="rounded-md border border-slate-100 bg-slate-50 p-3">
           <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-            <FolderInput size={16} />
-            Folder watch
-          </div>
-          <p className="mt-2 break-all font-mono text-xs text-slate-600">
-            {status?.directory ?? "Not configured"}
-          </p>
-          <p className="mt-2 text-xs text-slate-500">
-            {folderEnabled
-              ? `Checks every ${formatSeconds(status?.interval_seconds)}`
-              : "Disabled"}
-          </p>
-        </div>
-
-        <div className="rounded-md border border-slate-100 bg-slate-50 p-3">
-          <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
             <RadioTower size={16} />
-            Scheduled fetch
+            Scheduled log fetch
           </div>
           <p className="mt-2 text-xs text-slate-500">
             {fetchEnabled
@@ -82,9 +74,24 @@ export function AutomationStatus({ status, loading }: AutomationStatusProps) {
           ) : null}
         </div>
 
+        <div className="rounded-md border border-slate-100 bg-slate-50 p-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+            <FolderInput size={16} />
+            Inbox folder
+          </div>
+          <p className="mt-2 break-all font-mono text-xs text-slate-600">
+            {status?.directory ?? "Not configured"}
+          </p>
+          <p className="mt-2 text-xs text-slate-500">
+            {folderEnabled
+              ? `Checks every ${formatSeconds(status?.interval_seconds)}`
+              : "Disabled"}
+          </p>
+        </div>
+
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <Clock size={14} />
-          New fetched logs appear automatically in the incident feed.
+          New fetched logs appear in the incident feed without manual upload.
         </div>
       </div>
     </section>

@@ -82,7 +82,12 @@ function App() {
   return (
     <div className="min-h-screen bg-slate-100 text-slate-950">
       <header className="flex flex-col gap-3 bg-[#0f172a] px-4 py-4 text-white sm:flex-row sm:items-center sm:justify-between lg:px-6">
-        <h1 className="text-xl font-bold">CSIRT Autopilot</h1>
+        <div>
+          <h1 className="text-xl font-bold">CSIRT Autopilot</h1>
+          <p className="text-sm text-slate-300">
+            Autonomous log intake and incident triage
+          </p>
+        </div>
 
         <div className="flex flex-wrap items-center gap-3">
           <span className="rounded-md bg-white/10 px-3 py-1 font-mono text-sm text-slate-200">
@@ -107,7 +112,7 @@ function App() {
       </header>
 
       <main className="flex flex-col lg:flex-row">
-        <aside className="w-full border-b border-slate-200 bg-slate-50 p-4 lg:w-[280px] lg:shrink-0 lg:border-b-0 lg:border-r">
+        <aside className="w-full border-b border-slate-200 bg-slate-50 p-4 lg:w-[320px] lg:shrink-0 lg:border-b-0 lg:border-r">
           <AutomationStatus
             status={ingestionStatus}
             loading={ingestionLoading}
@@ -137,10 +142,10 @@ function App() {
             <div className="flex min-h-96 flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white px-6 text-center text-slate-500">
               <Shield size={48} className="mb-4 text-slate-400" />
               <p className="text-base font-semibold text-slate-700">
-                Select an incident to view details
+                Waiting for automatically fetched incidents
               </p>
               <p className="mt-2 text-sm text-slate-500">
-                Incidents requiring review will be highlighted
+                Scheduled log sources and inbox files will appear here as they are analyzed.
               </p>
             </div>
           )}
