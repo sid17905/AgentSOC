@@ -1,3 +1,4 @@
+
 fastapi==0.111.0
 uvicorn[standard]==0.30.0
 pydantic==2.7.0
@@ -12,3 +13,4 @@ Pillow==10.3.0
 pytesseract==0.3.10
 opencv-python-headless==4.9.0.80
 reportlab==4.2.0
+

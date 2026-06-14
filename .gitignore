@@ -1,3 +1,8 @@
+.agent
+.env
+.claude
+.venv
+00_common_refernce.txt
 # Python
 __pycache__/
 *.py[cod]
@@ -52,3 +57,4 @@ desktop.ini
 *.tmp
 *.temp
 *.bak
+
