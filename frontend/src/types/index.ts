@@ -52,3 +52,17 @@ export interface AgentInput {
   content: string;
   filename?: string;
 }
+
+export interface IngestionStatus {
+  enabled: boolean;
+  directory: string;
+  archive_directory: string;
+  error_directory: string;
+  interval_seconds: number;
+  max_file_size_bytes: number;
+  auto_fetch_enabled: boolean;
+  auto_fetch_sources: string[];
+  auto_fetch_interval_seconds: number;
+  auto_fetch_start_at_end: boolean;
+  auto_fetch_max_bytes: number;
+}

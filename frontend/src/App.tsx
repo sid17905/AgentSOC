@@ -3,15 +3,20 @@ import { Shield } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "./api/client";
 import { ApprovalPanel } from "./components/ApprovalPanel";
+import { AutomationStatus } from "./components/AutomationStatus";
 import { IncidentDetail } from "./components/IncidentDetail";
 import { IncidentFeed } from "./components/IncidentFeed";
 import { UploadPanel } from "./components/UploadPanel";
 import { useIncidentStream } from "./hooks/useIncidentStream";
+import type { IngestionStatus } from "./types";
 
 function App() {
   const { incidents, connected } = useIncidentStream();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [clock, setClock] = useState(() => format(new Date(), "HH:mm:ss"));
+  const [ingestionStatus, setIngestionStatus] =
+    useState<IngestionStatus | null>(null);
+  const [ingestionLoading, setIngestionLoading] = useState(true);
   const selectedIncident =
     incidents.find((incident) => incident.id === selectedId) ?? null;
 
@@ -21,6 +26,32 @@ function App() {
     }, 1000);
 
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadStatus = async () => {
+      try {
+        const result = await api.getIngestionStatus();
+        if (!cancelled) setIngestionStatus(result.data);
+      } catch (error) {
+        console.error("[AutomationStatus] Failed to load status", error);
+        if (!cancelled) setIngestionStatus(null);
+      } finally {
+        if (!cancelled) setIngestionLoading(false);
+      }
+    };
+
+    void loadStatus();
+    const timer = window.setInterval(() => {
+      void loadStatus();
+    }, 10000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -77,6 +108,10 @@ function App() {
 
       <main className="flex flex-col lg:flex-row">
         <aside className="w-full border-b border-slate-200 bg-slate-50 p-4 lg:w-[280px] lg:shrink-0 lg:border-b-0 lg:border-r">
+          <AutomationStatus
+            status={ingestionStatus}
+            loading={ingestionLoading}
+          />
           <UploadPanel />
         </aside>
 
