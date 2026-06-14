@@ -1,0 +1,267 @@
+import asyncio
+import base64
+import inspect
+from datetime import datetime
+from typing import List
+
+try:
+    from dotenv import load_dotenv
+except Exception:
+    load_dotenv = None
+
+from fastapi import (
+    FastAPI,
+    File,
+    HTTPException,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+
+from backend.agent.orchestrator import run_agent
+from backend.schemas import AgentInput, IncidentReport, IncidentStatus, InputType
+
+
+if load_dotenv is not None:
+    load_dotenv()
+
+app = FastAPI(title="CSIRT Autopilot")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+incidents: dict[str, IncidentReport] = {}
+
+
+def ts() -> str:
+    return datetime.utcnow().strftime("[%H:%M:%S UTC]")
+
+
+def _now_z() -> str:
+    return f"{datetime.utcnow().isoformat()}Z"
+
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, ws: WebSocket):
+        await ws.accept()
+        self.active_connections.append(ws)
+
+    def disconnect(self, ws: WebSocket):
+        if ws in self.active_connections:
+            self.active_connections.remove(ws)
+
+    async def broadcast(self, message: dict):
+        dead = []
+        for conn in self.active_connections:
+            try:
+                await conn.send_json(message)
+            except Exception:
+                dead.append(conn)
+        for conn in dead:
+            self.disconnect(conn)
+
+
+manager = ConnectionManager()
+
+
+def _incident_or_404(id: str) -> IncidentReport:
+    incident = incidents.get(id)
+    if incident is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    return incident
+
+
+async def _maybe_create_github_issue(incident: IncidentReport):
+    try:
+        from backend.delivery.github_issues import create_issue
+    except Exception:
+        return
+
+    try:
+        result = create_issue(incident)
+        if inspect.isawaitable(result):
+            await result
+    except Exception as exc:
+        incident.agent_thoughts.append(
+            f"{ts()} [GitHub Issues] Issue creation skipped: {exc}"
+        )
+        incident.updated_at = datetime.utcnow()
+
+
+def _detect_input_type(file: UploadFile, data: bytes) -> InputType:
+    filename = (file.filename or "").lower()
+    content_type = (file.content_type or "").lower()
+
+    if filename.endswith(".pdf") or content_type == "application/pdf":
+        return InputType.PDF
+    if content_type.startswith("image/") or filename.endswith(
+        (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tiff")
+    ):
+        return InputType.IMAGE
+    if filename.endswith((".eml", ".msg")) or content_type == "message/rfc822":
+        return InputType.EMAIL
+    if filename.endswith(".json") or content_type == "application/json":
+        return InputType.JSON
+    return InputType.LOG
+
+
+def _build_agent_input(file: UploadFile, data: bytes) -> AgentInput:
+    input_type = _detect_input_type(file, data)
+    if input_type in {InputType.PDF, InputType.IMAGE}:
+        content = base64.b64encode(data).decode("ascii")
+    else:
+        content = data.decode("utf-8", errors="replace")
+    return AgentInput(input_type=input_type, content=content, filename=file.filename)
+
+
+def _fallback_pdf_report(incident: IncidentReport) -> bytes:
+    lines = [
+        "CSIRT Autopilot Incident Report",
+        "",
+        f"ID: {incident.id}",
+        f"Status: {incident.status.value}",
+        f"Type: {incident.incident_type.value}",
+        f"Severity: {incident.severity.value}",
+        f"Confidence: {incident.confidence:.2f}",
+        f"Title: {incident.title}",
+        "",
+        "Summary:",
+        incident.summary,
+        "",
+        "Playbook Steps:",
+        *[f"- {step}" for step in incident.playbook_steps],
+    ]
+    escaped_lines = [
+        line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+        for line in lines[:42]
+    ]
+    rendered_lines = "\n".join(f"({line}) Tj T*" for line in escaped_lines)
+    stream = f"BT /F1 11 Tf 72 760 Td 14 TL\n{rendered_lines}\nET"
+    stream_bytes = stream.encode("latin-1", errors="replace")
+    header = b"%PDF-1.4\n"
+    objects = [
+        b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n",
+        b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n",
+        b"3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj\n",
+        (
+            b"4 0 obj << /Length "
+            + str(len(stream_bytes)).encode("ascii")
+            + b" >> stream\n"
+            + stream_bytes
+            + b"\nendstream endobj\n"
+        ),
+        b"5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n",
+    ]
+    offsets = []
+    body = b""
+    cursor = len(header)
+    for obj in objects:
+        offsets.append(cursor)
+        body += obj
+        cursor += len(obj)
+    xref_at = len(header) + len(body)
+    xref = b"xref\n0 6\n0000000000 65535 f \n"
+    xref += b"".join(f"{offset:010d} 00000 n \n".encode("ascii") for offset in offsets)
+    trailer = (
+        b"trailer << /Size 6 /Root 1 0 R >>\nstartxref\n"
+        + str(xref_at).encode("ascii")
+        + b"\n%%EOF\n"
+    )
+    return header + body + xref + trailer
+
+
+@app.post("/api/v1/analyze")
+async def analyze(agent_input: AgentInput):
+    incident = IncidentReport(
+        status=IncidentStatus.ANALYZING,
+        raw_input=agent_input.content,
+    )
+    incident.agent_thoughts = [f"[{datetime.utcnow().isoformat()}Z] Analysis started."]
+    incidents[incident.id] = incident
+    await manager.broadcast(
+        {"type": "incident_update", "data": incident.model_dump(mode="json")}
+    )
+    asyncio.create_task(run_agent(agent_input, incident, manager.broadcast))
+    return {"incident_id": incident.id}
+
+
+@app.get("/api/v1/incidents")
+async def list_incidents():
+    return sorted(incidents.values(), key=lambda item: item.created_at, reverse=True)
+
+
+@app.get("/api/v1/incidents/{id}")
+async def get_incident(id: str):
+    return _incident_or_404(id)
+
+
+@app.post("/api/v1/incidents/{id}/approve")
+async def approve_incident(id: str):
+    incident = _incident_or_404(id)
+    now = _now_z()
+    incident.status = IncidentStatus.APPROVED
+    incident.updated_at = datetime.utcnow()
+    incident.agent_thoughts.append(f"[{now}] Analyst approved incident.")
+    await _maybe_create_github_issue(incident)
+    await manager.broadcast(
+        {"type": "incident_update", "data": incident.model_dump(mode="json")}
+    )
+    return incident
+
+
+@app.post("/api/v1/incidents/{id}/reject")
+async def reject_incident(id: str):
+    incident = _incident_or_404(id)
+    now = _now_z()
+    incident.status = IncidentStatus.REJECTED
+    incident.updated_at = datetime.utcnow()
+    incident.agent_thoughts.append(
+        f"[{now}] Analyst rejected - queued for re-analysis."
+    )
+    await manager.broadcast(
+        {"type": "incident_update", "data": incident.model_dump(mode="json")}
+    )
+    return incident
+
+
+@app.websocket("/ws/incidents")
+async def incidents_websocket(ws: WebSocket):
+    await manager.connect(ws)
+    try:
+        await ws.send_json(
+            [incident.model_dump(mode="json") for incident in incidents.values()]
+        )
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(ws)
+    except Exception:
+        manager.disconnect(ws)
+
+
+@app.post("/api/v1/upload")
+async def upload(file: UploadFile = File(...)):
+    data = await file.read()
+    return _build_agent_input(file, data)
+
+
+@app.get("/api/v1/incidents/{id}/report/pdf")
+async def incident_report_pdf(id: str):
+    incident = _incident_or_404(id)
+    try:
+        from backend.reporting.report_generator import generate_pdf_report
+
+        pdf_bytes = generate_pdf_report(incident)
+    except Exception:
+        pdf_bytes = _fallback_pdf_report(incident)
+    return Response(content=pdf_bytes, media_type="application/pdf")
