@@ -40,3 +40,27 @@ uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 Drop `.log`, `.txt`, `.json`, `.eml`, `.pdf`, `.png`, `.jpg`, or `.webp` files into `samples/inbox`. The backend will analyze each file, send live updates to the dashboard, then move processed files to `samples/processed`. Files that cannot be ingested are moved to `samples/failed`.
+
+To fetch logs automatically every N seconds from a live log file or URL:
+
+```bash
+touch samples/live.log
+export AUTO_FETCH_ENABLED=true
+export AUTO_FETCH_SOURCES=samples/live.log
+export AUTO_FETCH_INTERVAL_SECONDS=30
+uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Append new log lines and they will be analyzed on the next fetch interval:
+
+```bash
+cat >> samples/live.log <<'EOF'
+Jan 15 14:22:01 web-01 sshd[1234]: Failed password for root from 185.220.101.5 port 22
+EOF
+```
+
+You can use multiple sources separated by commas:
+
+```bash
+export AUTO_FETCH_SOURCES=samples/live.log,/var/log/auth.log,http://localhost:9000/latest-alerts
+```

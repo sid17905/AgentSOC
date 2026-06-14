@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     auto_ingest_error_dir: str = "samples/failed"
     auto_ingest_interval_seconds: float = 5.0
     auto_ingest_max_file_size_bytes: int = 10 * 1024 * 1024
+    auto_fetch_enabled: bool = False
+    auto_fetch_sources: str = ""
+    auto_fetch_interval_seconds: float = 60.0
+    auto_fetch_start_at_end: bool = False
+    auto_fetch_max_bytes: int = 64 * 1024
 
 
 @lru_cache

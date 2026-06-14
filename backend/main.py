@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import hashlib
 import inspect
 import shutil
 from contextlib import asynccontextmanager
@@ -16,6 +17,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+import httpx
 
 from backend.agent.orchestrator import run_agent
 from backend.config import get_settings, utc_now
@@ -28,16 +30,19 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     del app
-    ingest_task = None
+    tasks = []
     if settings.auto_ingest_enabled:
-        ingest_task = asyncio.create_task(_auto_ingest_loop())
+        tasks.append(asyncio.create_task(_auto_ingest_loop()))
+    if settings.auto_fetch_enabled:
+        tasks.append(asyncio.create_task(_auto_fetch_loop()))
     try:
         yield
     finally:
-        if ingest_task:
-            ingest_task.cancel()
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
             try:
-                await ingest_task
+                await task
             except asyncio.CancelledError:
                 pass
 
@@ -229,6 +234,99 @@ async def _auto_ingest_loop() -> None:
         await asyncio.sleep(settings.auto_ingest_interval_seconds)
 
 
+def _fetch_sources() -> list[str]:
+    return [
+        source.strip()
+        for source in settings.auto_fetch_sources.split(",")
+        if source.strip()
+    ]
+
+
+async def _read_new_log_bytes(path: Path, offsets: dict[str, int]) -> bytes:
+    key = str(path)
+    size = path.stat().st_size
+    offset = offsets.get(key)
+    if offset is None:
+        offset = size if settings.auto_fetch_start_at_end else 0
+    if size < offset:
+        offset = 0
+    if size == offset:
+        offsets[key] = size
+        return b""
+
+    read_size = min(size - offset, settings.auto_fetch_max_bytes)
+
+    def read_chunk() -> bytes:
+        with path.open("rb") as handle:
+            handle.seek(offset)
+            return handle.read(read_size)
+
+    data = await asyncio.to_thread(read_chunk)
+    offsets[key] = offset + len(data)
+    return data
+
+
+async def _fetch_url(source: str, fingerprints: dict[str, str]) -> bytes:
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.get(source)
+        response.raise_for_status()
+        data = response.content[: settings.auto_fetch_max_bytes]
+
+    fingerprint = hashlib.sha256(data).hexdigest()
+    if fingerprints.get(source) == fingerprint:
+        return b""
+
+    fingerprints[source] = fingerprint
+    return data
+
+
+async def _fetch_source(
+    source: str,
+    offsets: dict[str, int],
+    fingerprints: dict[str, str],
+) -> bytes:
+    if source.startswith(("http://", "https://")):
+        return await _fetch_url(source, fingerprints)
+
+    path = Path(source)
+    if not path.exists() or not path.is_file():
+        raise FileNotFoundError(f"Log source not found: {source}")
+    return await _read_new_log_bytes(path, offsets)
+
+
+async def _auto_fetch_loop() -> None:
+    sources = _fetch_sources()
+    offsets: dict[str, int] = {}
+    fingerprints: dict[str, str] = {}
+
+    if not sources:
+        print("[Auto fetch] Enabled but AUTO_FETCH_SOURCES is empty.")
+
+    while True:
+        for source in sources:
+            try:
+                data = await _fetch_source(source, offsets, fingerprints)
+                if not data.strip():
+                    continue
+
+                filename = Path(source).name or "fetched.log"
+                agent_input = AgentInput(
+                    input_type=InputType.LOG,
+                    content=data.decode("utf-8", errors="replace"),
+                    filename=filename,
+                )
+                incident = await _submit_for_analysis(
+                    agent_input,
+                    source=f"auto-fetch:{source}",
+                )
+                print(
+                    f"[Auto fetch] {source} submitted as incident {incident.id}"
+                )
+            except Exception as exc:
+                print(f"[Auto fetch] Failed to fetch {source}: {exc}")
+        await asyncio.sleep(settings.auto_fetch_interval_seconds)
+
+
 def _fallback_pdf_report(incident: IncidentReport) -> bytes:
     lines = [
         "CSIRT Autopilot Incident Report",
@@ -360,6 +458,11 @@ async def ingestion_status():
         "error_directory": settings.auto_ingest_error_dir,
         "interval_seconds": settings.auto_ingest_interval_seconds,
         "max_file_size_bytes": settings.auto_ingest_max_file_size_bytes,
+        "auto_fetch_enabled": settings.auto_fetch_enabled,
+        "auto_fetch_sources": _fetch_sources(),
+        "auto_fetch_interval_seconds": settings.auto_fetch_interval_seconds,
+        "auto_fetch_start_at_end": settings.auto_fetch_start_at_end,
+        "auto_fetch_max_bytes": settings.auto_fetch_max_bytes,
     }
 
 
