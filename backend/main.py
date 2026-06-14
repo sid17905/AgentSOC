@@ -1,6 +1,9 @@
 import asyncio
 import base64
 import inspect
+import shutil
+from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import List
 
 from fastapi import (
@@ -19,8 +22,27 @@ from backend.config import get_settings, utc_now
 from backend.schemas import AgentInput, IncidentReport, IncidentStatus, InputType
 
 
-app = FastAPI(title="CSIRT Autopilot")
 settings = get_settings()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    del app
+    ingest_task = None
+    if settings.auto_ingest_enabled:
+        ingest_task = asyncio.create_task(_auto_ingest_loop())
+    try:
+        yield
+    finally:
+        if ingest_task:
+            ingest_task.cancel()
+            try:
+                await ingest_task
+            except asyncio.CancelledError:
+                pass
+
+
+app = FastAPI(title="CSIRT Autopilot", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -92,8 +114,13 @@ async def _maybe_create_github_issue(incident: IncidentReport):
 
 
 def _detect_input_type(file: UploadFile, data: bytes) -> InputType:
-    filename = (file.filename or "").lower()
-    content_type = (file.content_type or "").lower()
+    del data
+    return _detect_input_type_from_name(file.filename or "", file.content_type or "")
+
+
+def _detect_input_type_from_name(filename: str, content_type: str = "") -> InputType:
+    filename = filename.lower()
+    content_type = content_type.lower()
 
     if filename.endswith(".pdf") or content_type == "application/pdf":
         return InputType.PDF
@@ -109,12 +136,97 @@ def _detect_input_type(file: UploadFile, data: bytes) -> InputType:
 
 
 def _build_agent_input(file: UploadFile, data: bytes) -> AgentInput:
-    input_type = _detect_input_type(file, data)
+    return _build_agent_input_from_bytes(
+        filename=file.filename or "upload",
+        data=data,
+        content_type=file.content_type or "",
+    )
+
+
+def _build_agent_input_from_bytes(
+    filename: str,
+    data: bytes,
+    content_type: str = "",
+) -> AgentInput:
+    input_type = _detect_input_type_from_name(filename, content_type)
     if input_type in {InputType.PDF, InputType.IMAGE}:
         content = base64.b64encode(data).decode("ascii")
     else:
         content = data.decode("utf-8", errors="replace")
-    return AgentInput(input_type=input_type, content=content, filename=file.filename)
+    return AgentInput(input_type=input_type, content=content, filename=filename)
+
+
+async def _submit_for_analysis(
+    agent_input: AgentInput,
+    source: str = "api",
+) -> IncidentReport:
+    incident = IncidentReport(
+        status=IncidentStatus.ANALYZING,
+        raw_input=agent_input.content,
+    )
+    incident.agent_thoughts = [
+        f"[{utc_now().isoformat()}] Analysis started from {source}."
+    ]
+    incidents[incident.id] = incident
+    await manager.broadcast(
+        {"type": "incident_update", "data": incident.model_dump(mode="json")}
+    )
+    asyncio.create_task(run_agent(agent_input, incident, manager.broadcast))
+    return incident
+
+
+def _unique_destination(directory: Path, filename: str) -> Path:
+    destination = directory / filename
+    if not destination.exists():
+        return destination
+
+    stem = destination.stem
+    suffix = destination.suffix
+    timestamp = utc_now().strftime("%Y%m%d%H%M%S")
+    return directory / f"{stem}-{timestamp}{suffix}"
+
+
+async def _ingest_file(path: Path) -> str:
+    if not path.is_file():
+        return "skipped"
+    if path.stat().st_size > settings.auto_ingest_max_file_size_bytes:
+        raise ValueError(
+            f"{path.name} exceeds AUTO_INGEST_MAX_FILE_SIZE_BYTES "
+            f"({settings.auto_ingest_max_file_size_bytes})"
+        )
+
+    data = await asyncio.to_thread(path.read_bytes)
+    agent_input = _build_agent_input_from_bytes(path.name, data)
+    incident = await _submit_for_analysis(agent_input, source=f"auto-ingest:{path.name}")
+
+    archive_dir = Path(settings.auto_ingest_archive_dir)
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    destination = _unique_destination(archive_dir, path.name)
+    await asyncio.to_thread(shutil.move, str(path), str(destination))
+    return incident.id
+
+
+async def _auto_ingest_loop() -> None:
+    ingest_dir = Path(settings.auto_ingest_dir)
+    error_dir = Path(settings.auto_ingest_error_dir)
+    ingest_dir.mkdir(parents=True, exist_ok=True)
+    error_dir.mkdir(parents=True, exist_ok=True)
+
+    while True:
+        for path in sorted(ingest_dir.iterdir()):
+            if not path.is_file():
+                continue
+            try:
+                incident_id = await _ingest_file(path)
+                print(f"[Auto ingest] {path.name} submitted as incident {incident_id}")
+            except Exception as exc:
+                print(f"[Auto ingest] Failed to ingest {path.name}: {exc}")
+                destination = _unique_destination(error_dir, path.name)
+                try:
+                    await asyncio.to_thread(shutil.move, str(path), str(destination))
+                except Exception as move_exc:
+                    print(f"[Auto ingest] Failed to move {path.name}: {move_exc}")
+        await asyncio.sleep(settings.auto_ingest_interval_seconds)
 
 
 def _fallback_pdf_report(incident: IncidentReport) -> bytes:
@@ -175,16 +287,7 @@ def _fallback_pdf_report(incident: IncidentReport) -> bytes:
 
 @app.post("/api/v1/analyze")
 async def analyze(agent_input: AgentInput):
-    incident = IncidentReport(
-        status=IncidentStatus.ANALYZING,
-        raw_input=agent_input.content,
-    )
-    incident.agent_thoughts = [f"[{utc_now().isoformat()}] Analysis started."]
-    incidents[incident.id] = incident
-    await manager.broadcast(
-        {"type": "incident_update", "data": incident.model_dump(mode="json")}
-    )
-    asyncio.create_task(run_agent(agent_input, incident, manager.broadcast))
+    incident = await _submit_for_analysis(agent_input)
     return {"incident_id": incident.id}
 
 
@@ -246,6 +349,18 @@ async def incidents_websocket(ws: WebSocket):
 async def upload(file: UploadFile = File(...)):
     data = await file.read()
     return _build_agent_input(file, data)
+
+
+@app.get("/api/v1/ingestion/status")
+async def ingestion_status():
+    return {
+        "enabled": settings.auto_ingest_enabled,
+        "directory": settings.auto_ingest_dir,
+        "archive_directory": settings.auto_ingest_archive_dir,
+        "error_directory": settings.auto_ingest_error_dir,
+        "interval_seconds": settings.auto_ingest_interval_seconds,
+        "max_file_size_bytes": settings.auto_ingest_max_file_size_bytes,
+    }
 
 
 @app.get("/api/v1/incidents/{id}/report/pdf")

@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     github_token: str = ""
     github_repo: str = ""
     frontend_origin: str = "http://localhost:5173"
+    auto_ingest_enabled: bool = False
+    auto_ingest_dir: str = "samples/inbox"
+    auto_ingest_archive_dir: str = "samples/processed"
+    auto_ingest_error_dir: str = "samples/failed"
+    auto_ingest_interval_seconds: float = 5.0
+    auto_ingest_max_file_size_bytes: int = 10 * 1024 * 1024
 
 
 @lru_cache
