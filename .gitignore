@@ -35,6 +35,10 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Codex/local assistant metadata
+.agents/
+.claude/
+
 # OS and editor files
 .DS_Store
 Thumbs.db
