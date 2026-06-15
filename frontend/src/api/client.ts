@@ -2,7 +2,8 @@ import axios from "axios";
 import type { AgentInput, IncidentReport, IngestionStatus } from "../types";
 
 // Uses Vite proxy (see vite.config.ts) - no hardcoded port needed
-const BASE = "/api/v1";
+
+const BASE = `${import.meta.env.VITE_API_URL ?? ""}/api/v1`;
 
 export const api = {
   analyze: (input: AgentInput) =>

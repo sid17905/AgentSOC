@@ -3,9 +3,13 @@ import { fetchIncidents } from "../api/client";
 import type { IncidentReport } from "../types";
 import { MOCK_INCIDENTS, USE_MOCK } from "../types/mockData";
 
-// Relative WS path - resolved by Vite proxy to ws://localhost:8000
+// In production, set VITE_WS_URL=wss://your-railway-app.railway.app/ws/incidents
+// In dev, falls back to relative path resolved by Vite proxy.
 const WS_PROTOCOL = window.location.protocol === "https:" ? "wss" : "ws";
-const WS_URL = `${WS_PROTOCOL}://${window.location.host}/ws/incidents`;
+const WS_URL =
+  import.meta.env.VITE_WS_URL ??
+  `${WS_PROTOCOL}://${window.location.host}/ws/incidents`;
+
 const INCIDENT_POLL_MS = 5000;
 
 export function useIncidentStream() {
@@ -92,14 +96,12 @@ function mergeIncidents(
   let changed = false;
   for (const incident of incomingIncidents) {
     const existing = byId.get(incident.id);
-    // Only mark changed if the record is new or actually different
     if (!existing || JSON.stringify(existing) !== JSON.stringify(incident)) {
       byId.set(incident.id, incident);
       changed = true;
     }
   }
 
-  // If nothing changed, return the same reference — React bails out of re-render
   if (!changed) return currentIncidents;
 
   return Array.from(byId.values()).sort(

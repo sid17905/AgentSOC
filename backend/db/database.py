@@ -1,9 +1,19 @@
+import os
 import sqlite3
 from pathlib import Path
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DB_PATH = PROJECT_ROOT / "data" / "csirt_incidents.db"
+# ── DB path resolution ────────────────────────────────────────────────────────
+# On Railway, mount a persistent volume at /data and set:
+#   DB_PATH=/data/csirt_incidents.db
+# Locally it falls back to the repo's data/ directory.
+_db_path_env = os.environ.get("DB_PATH")
+
+if _db_path_env:
+    DB_PATH = Path(_db_path_env)
+else:
+    PROJECT_ROOT = Path(__file__).resolve().parents[2]
+    DB_PATH = PROJECT_ROOT / "data" / "csirt_incidents.db"
 
 
 def get_connection() -> sqlite3.Connection:

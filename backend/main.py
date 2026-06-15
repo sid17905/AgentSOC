@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import inspect
+import os
 from contextlib import asynccontextmanager
 from typing import List
 
@@ -28,25 +29,24 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ── DB init ──────────────────────────────────────────────────────────────
     init_db()
-
-    # ── Auto-seed all mock events in parallel at startup ─────────────────────
-    # Runs as a background task so the server is responsive immediately.
-    # All 4 event types (brute-force, ransomware, phishing, exfiltration)
-    # are ingested with a 0.3 s stagger to avoid write collisions.
     asyncio.create_task(mock_ingestion.auto_start(submit_for_analysis))
-
     yield
-    # ── Shutdown ─────────────────────────────────────────────────────────────
     await mock_ingestion.stop()
 
 
 app = FastAPI(title="CSIRT Autopilot", lifespan=lifespan)
 
+# ── CORS ─────────────────────────────────────────────────────────────────────
+# In production, FRONTEND_ORIGIN env var must be set to your Vercel URL.
+# Supports multiple origins via comma-separated list:
+#   FRONTEND_ORIGIN=https://csirt.vercel.app,https://csirt-staging.vercel.app
+_raw_origins = os.environ.get("FRONTEND_ORIGIN", settings.frontend_origin)
+allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_origin],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
