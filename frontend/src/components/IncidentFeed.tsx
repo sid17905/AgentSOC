@@ -127,7 +127,10 @@ export function IncidentFeed({
       <div className="space-y-2">
         {sortedIncidents.map((incident) => {
           const selected = incident.id === selectedId;
-          const status = statusMeta[incident.status];
+          const status = statusMeta[incident.status] ?? {
+              label: incident.status,
+              indicator: <span className="h-2 w-2 rounded-full bg-slate-400" />,
+            };
 
           return (
             <button
