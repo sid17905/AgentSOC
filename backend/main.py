@@ -28,8 +28,18 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # ── DB init ──────────────────────────────────────────────────────────────
     init_db()
+
+    # ── Auto-seed all mock events in parallel at startup ─────────────────────
+    # Runs as a background task so the server is responsive immediately.
+    # All 4 event types (brute-force, ransomware, phishing, exfiltration)
+    # are ingested with a 0.3 s stagger to avoid write collisions.
+    asyncio.create_task(mock_ingestion.auto_start(submit_for_analysis))
+
     yield
+    # ── Shutdown ─────────────────────────────────────────────────────────────
+    await mock_ingestion.stop()
 
 
 app = FastAPI(title="CSIRT Autopilot", lifespan=lifespan)

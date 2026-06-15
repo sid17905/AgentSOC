@@ -11,7 +11,7 @@ except Exception:
     OpenAIClient = None
 
 from backend.agent.state import AgentState
-from backend.agent.tools import TOOL_DESCRIPTIONS, execute_tool
+from backend.agent.tools import TOOL_DESCRIPTIONS, execute_tool, PLAYBOOKS
 from backend.config import get_settings, utc_now
 from backend.schemas.agent_input import AgentInput
 from backend.schemas.incident import (
@@ -59,11 +59,68 @@ IMPORTANT: Output ONLY valid JSON. No markdown, no explanation, no backticks.
 Start with {{ and end with }}.
 """
 
+# ── Per-type MITRE technique stubs used by the enriched fallback ─────────────
+MITRE_STUBS: dict[str, list[dict]] = {
+    "ransomware": [
+        {"technique_id": "T1486",     "technique_name": "Data Encrypted for Impact",       "tactic": "impact"},
+        {"technique_id": "T1059.001", "technique_name": "PowerShell",                       "tactic": "execution"},
+        {"technique_id": "T1071.001", "technique_name": "Web Protocols C2",                 "tactic": "command-and-control"},
+    ],
+    "phishing": [
+        {"technique_id": "T1566.001", "technique_name": "Spearphishing Link",               "tactic": "initial-access"},
+        {"technique_id": "T1598.003", "technique_name": "Phishing for Information",         "tactic": "reconnaissance"},
+    ],
+    "data_exfiltration": [
+        {"technique_id": "T1048",     "technique_name": "Exfiltration Over Alt Protocol",   "tactic": "exfiltration"},
+        {"technique_id": "T1567",     "technique_name": "Exfiltration to Cloud Storage",    "tactic": "exfiltration"},
+        {"technique_id": "T1539",     "technique_name": "Steal Web Session Cookie",         "tactic": "credential-access"},
+    ],
+    "lateral_movement": [
+        {"technique_id": "T1021.002", "technique_name": "SMB/Windows Admin Shares",         "tactic": "lateral-movement"},
+        {"technique_id": "T1550.002", "technique_name": "Pass the Hash",                    "tactic": "defense-evasion"},
+    ],
+    "brute_force": [
+        {"technique_id": "T1110.001", "technique_name": "Password Guessing",                "tactic": "credential-access"},
+        {"technique_id": "T1078",     "technique_name": "Valid Accounts",                   "tactic": "defense-evasion"},
+    ],
+    "unknown": [
+        {"technique_id": "T1190",     "technique_name": "Exploit Public-Facing Application","tactic": "initial-access"},
+    ],
+}
+
 
 def log_thought(incident: IncidentReport, msg: str):
     ts = utc_now().strftime("[%H:%M:%S UTC]")
     incident.agent_thoughts.append(f"{ts} {msg}")
     incident.updated_at = utc_now()
+
+
+def _enrich_fallback(text: str, itype: str) -> tuple[list[dict], list[dict]]:
+    """
+    Always-on enrichment used by the fallback path.
+    Runs the regex IOC extractor and returns type-matched MITRE stubs.
+    No external API calls — works fully offline.
+    """
+    # ── IOCs via regex extractor ─────────────────────────────────────────────
+    iocs: list[dict] = []
+    try:
+        from backend.enrichment.ioc_extractor import extract_iocs
+        raw = extract_iocs(text)
+        # Normalise: drop internal-only keys the schema doesn't accept
+        for item in raw:
+            iocs.append({
+                "type":       item.get("type", "unknown"),
+                "value":      item.get("value", ""),
+                "confidence": item.get("confidence", 0.70),
+                "reputation": item.get("reputation"),   # may be None — that's fine
+            })
+    except Exception:
+        pass  # extractor unavailable — leave iocs empty rather than crash
+
+    # ── MITRE via static stubs (no network needed) ───────────────────────────
+    mitre = MITRE_STUBS.get(itype, MITRE_STUBS["unknown"])
+
+    return iocs, mitre
 
 
 def classify_rule_based(text: str) -> dict:
@@ -83,17 +140,22 @@ def classify_rule_based(text: str) -> dict:
         itype, sev, conf = "brute_force", "P3", 0.72
     else:
         itype, sev, conf = "unknown", "P3", 0.40
+
+    # ── Always run enrichment so IOCs + MITRE are never empty ────────────────
+    iocs, mitre = _enrich_fallback(text, itype)
+
     return {
-        "incident_type": itype,
-        "severity": sev,
-        "confidence": conf,
-        "title": f"Possible {itype.replace('_', ' ').title()} Detected",
+        "incident_type":    itype,
+        "severity":         sev,
+        "confidence":       conf,
+        "title":            f"Possible {itype.replace('_', ' ').title()} Detected",
         "summary": (
-            f"Rule-based classification: {itype}. Manual review recommended."
+            f"Rule-based classification: {itype}. "
+            f"{len(iocs)} IOC(s) extracted. Manual review recommended."
         ),
-        "playbook_steps": [],
-        "iocs": [],
-        "mitre_techniques": [],
+        "playbook_steps":   PLAYBOOKS.get(itype, PLAYBOOKS["unknown"]),
+        "iocs":             iocs,
+        "mitre_techniques": mitre,
     }
 
 
@@ -139,7 +201,7 @@ def _coerce_iocs(values) -> list[IOC]:
         if not isinstance(item, dict):
             continue
         try:
-            iocs.append(IOC(**item))
+            iocs.append(IOC(**{k: v for k, v in item.items() if k in IOC.model_fields}))
         except Exception:
             continue
     return iocs
@@ -166,17 +228,15 @@ def _coerce_strings(values) -> list[str]:
 
 
 def _apply_agent_result(incident: IncidentReport, result: dict):
-    incident.incident_type = _coerce_incident_type(result.get("incident_type"))
-    incident.severity = _coerce_severity(result.get("severity"))
-    incident.confidence = _coerce_confidence(result.get("confidence"))
-    incident.title = str(result.get("title") or "Security Incident Detected")
-    incident.summary = str(result.get("summary") or "Manual review recommended.")
-    incident.iocs = _coerce_iocs(result.get("iocs"))
-    incident.mitre_techniques = _coerce_mitre_techniques(
-        result.get("mitre_techniques")
-    )
+    incident.incident_type  = _coerce_incident_type(result.get("incident_type"))
+    incident.severity       = _coerce_severity(result.get("severity"))
+    incident.confidence     = _coerce_confidence(result.get("confidence"))
+    incident.title          = str(result.get("title") or "Security Incident Detected")
+    incident.summary        = str(result.get("summary") or "Manual review recommended.")
+    incident.iocs           = _coerce_iocs(result.get("iocs"))
+    incident.mitre_techniques = _coerce_mitre_techniques(result.get("mitre_techniques"))
     incident.playbook_steps = _coerce_strings(result.get("playbook_steps"))
-    incident.updated_at = utc_now()
+    incident.updated_at     = utc_now()
 
 
 async def _broadcast_incident(broadcast_fn: Callable, incident: IncidentReport):
@@ -240,9 +300,7 @@ async def run_agent(
         while state.should_continue and state.iteration < state.max_iterations:
             elapsed = time.time() - state.started_at
             if elapsed > state.time_limit_seconds:
-                fallback_reason = (
-                    f"Agent hit {state.time_limit_seconds}s limit."
-                )
+                fallback_reason = f"Agent hit {state.time_limit_seconds}s limit."
                 log_thought(
                     incident,
                     f"[Timeout] Agent hit {state.time_limit_seconds}s limit.",
@@ -266,7 +324,7 @@ async def run_agent(
 
             action = parsed.get("action")
             if action == "tool":
-                tool_name = str(parsed.get("tool", ""))
+                tool_name  = str(parsed.get("tool", ""))
                 tool_input = parsed.get("input") or {}
                 if not isinstance(tool_input, dict):
                     tool_input = {}
@@ -279,6 +337,20 @@ async def run_agent(
                 continue
 
             if action == "done":
+                # ── If Groq returned empty IOCs/MITRE, enrich anyway ─────────
+                if not parsed.get("iocs"):
+                    extra_iocs, _ = _enrich_fallback(
+                        agent_input.content,
+                        str(parsed.get("incident_type", "unknown")),
+                    )
+                    parsed["iocs"] = extra_iocs
+                if not parsed.get("mitre_techniques"):
+                    _, extra_mitre = _enrich_fallback(
+                        agent_input.content,
+                        str(parsed.get("incident_type", "unknown")),
+                    )
+                    parsed["mitre_techniques"] = extra_mitre
+
                 _apply_agent_result(incident, parsed)
                 completed = True
                 state.should_continue = False
@@ -294,9 +366,14 @@ async def run_agent(
             log_thought(incident, "[Agent] Max iterations reached, finalizing.")
         fallback = classify_rule_based(agent_input.content)
         _apply_agent_result(incident, fallback)
-        log_thought(incident, f"[Fallback] {fallback_reason}")
+        log_thought(
+            incident,
+            f"[Fallback] {fallback_reason} "
+            f"— {len(incident.iocs)} IOC(s), "
+            f"{len(incident.mitre_techniques)} MITRE technique(s) extracted.",
+        )
 
-    incident.status = IncidentStatus.AWAITING_APPROVAL
+    incident.status     = IncidentStatus.AWAITING_APPROVAL
     incident.updated_at = utc_now()
     await _broadcast_incident(broadcast_fn, incident)
     return incident

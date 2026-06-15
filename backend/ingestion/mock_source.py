@@ -95,6 +95,64 @@ class MockIngestionRunner:
             self._status.last_error = str(exc)
             raise
 
+    async def _ingest_specific(self, submit: SubmitIncident, index: int) -> dict:
+        """Ingest a specific MOCK_EVENT by index without advancing the shared pointer."""
+        filename, content = MOCK_EVENTS[index]
+        stamped_content = (
+            f"# mock_source=auto-boot filename={filename} "
+            f"generated_at={utc_now().isoformat()}\n"
+            f"{content}"
+        )
+        input_type = InputType.EMAIL if filename.endswith(".eml") else InputType.LOG
+        agent_input = AgentInput(
+            input_type=input_type,
+            content=stamped_content,
+            filename=filename,
+        )
+        try:
+            result = await submit(agent_input)
+            self._status.produced_count += 1
+            self._status.last_filename = agent_input.filename
+            self._status.last_incident_id = result.get("incident_id")
+            self._status.last_error = None
+            self._status.last_ingested_at = utc_now().isoformat()
+            return {
+                "source": "mock-boot",
+                "filename": agent_input.filename,
+                "incident_id": self._status.last_incident_id,
+            }
+        except Exception as exc:
+            self._status.last_error = str(exc)
+            raise
+
+    async def auto_start(self, submit: SubmitIncident) -> None:
+        """
+        Called once at server startup.
+        Ingests ALL mock event types in parallel so the feed is
+        pre-populated the moment the UI loads.
+        A short stagger (0.3 s between each) avoids DB write collisions.
+        """
+        print("[MockIngestion] Auto-seeding all mock events on startup...")
+        self._status.running = True
+
+        async def _staggered(index: int) -> None:
+            await asyncio.sleep(index * 0.3)
+            try:
+                result = await self._ingest_specific(submit, index)
+                print(
+                    f"[MockIngestion] Seeded [{index+1}/{len(MOCK_EVENTS)}] "
+                    f"{result['filename']} → {result['incident_id']}"
+                )
+            except Exception as exc:
+                print(f"[MockIngestion] Seed failed for index {index}: {exc}")
+
+        await asyncio.gather(*[_staggered(i) for i in range(len(MOCK_EVENTS))])
+        self._status.running = False
+        print(
+            f"[MockIngestion] Auto-seed complete. "
+            f"{self._status.produced_count} incidents created."
+        )
+
     def start(
         self,
         submit: SubmitIncident,

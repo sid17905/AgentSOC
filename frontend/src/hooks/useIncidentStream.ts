@@ -88,9 +88,19 @@ function mergeIncidents(
   for (const incident of currentIncidents) {
     byId.set(incident.id, incident);
   }
+
+  let changed = false;
   for (const incident of incomingIncidents) {
-    byId.set(incident.id, incident);
+    const existing = byId.get(incident.id);
+    // Only mark changed if the record is new or actually different
+    if (!existing || JSON.stringify(existing) !== JSON.stringify(incident)) {
+      byId.set(incident.id, incident);
+      changed = true;
+    }
   }
+
+  // If nothing changed, return the same reference — React bails out of re-render
+  if (!changed) return currentIncidents;
 
   return Array.from(byId.values()).sort(
     (left, right) =>

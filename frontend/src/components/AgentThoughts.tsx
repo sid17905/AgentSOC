@@ -18,8 +18,20 @@ export function AgentThoughts({ thoughts, status }: AgentThoughtsProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [thoughts]);
+  const el = bottomRef.current;
+  if (!el) return;
+
+  // Only auto-scroll when a new thought is actually appended
+  const container = el.parentElement;
+  if (!container) return;
+
+  const isNearBottom =
+    container.scrollHeight - container.scrollTop - container.clientHeight < 60;
+
+  if (isNearBottom) {
+    el.scrollIntoView({ behavior: "smooth" });
+  }
+}, [thoughts.length]); // ← length, not the array reference
 
   return (
     <div className="max-h-72 overflow-y-auto rounded bg-slate-950 p-4 font-mono text-sm leading-6 text-slate-200 shadow-inner">
